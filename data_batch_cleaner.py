@@ -4,12 +4,15 @@ import pandas as pd
 
 class DataBatchCleaner:
     def __init__(self, input_dir, output_dir):
+        """Initializes the DataBatchCleaner instance with input and output directories where data files are read and saved."""
         self.input_dir = input_dir
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
         self.summary_data = []
+        self.game_stats_data = []
 
     def clean_data(self, df):
+        """Cleans and preprocesses the raw data by dropping useless columns and renaming the used columns for clarity."""
         df = df.drop(columns=[
             'Observation date', 'Observation duration', 'Description', 'Observation type',
             'Source', 'Time offset (s)', 'Media duration (s)', 'FPS', 'Subject',
@@ -24,6 +27,7 @@ class DataBatchCleaner:
         return df
     
     def subtract_intervals(self, base_intervals, sub_intervals):
+        """Subtracts a list of time intervals (sub_intervals) from a base set of intervals (base_intervals) and returns the remaining intervals."""
         result = []
         for start, stop in base_intervals:
             temp = [(start, stop)]
@@ -44,9 +48,11 @@ class DataBatchCleaner:
         return result
     
     def rows_in_intervals(self, df, intervals):
+        """Filters and returns rows from a DataFrame that fall within the given list of time intervals."""
         return df[df['Time'].apply(lambda t: any(start <= t <= end for start, end in intervals))]
     
     def subtract_timeouts(self, possessions, timeouts):
+        """Removes timeout intervals from the list of possession intervals and returns the adjusted time intervals."""
         clean_durations = []
         for start, stop in possessions:
             duration = stop - start
@@ -59,6 +65,7 @@ class DataBatchCleaner:
         return clean_durations
     
     def get_scoring_possessions(self, possessions, score_events):
+        """Returns a list of possession intervals during which scores occurred, based on score timestamps and known possession intervals."""
         scoring_possessions = []
         for start, stop in possessions:
             if any((score_time >= start) and (score_time <= stop) for score_time in score_events):
@@ -66,6 +73,7 @@ class DataBatchCleaner:
         return scoring_possessions
     
     def count_passes_in_possessions(self, possessions, team_df):
+        """Counts the number of passes made within each scoring possession, returning a list of pass counts."""
         pass_counts = []
         for start, stop in possessions:
             passes = team_df[
@@ -77,7 +85,7 @@ class DataBatchCleaner:
         return pass_counts
     
     def compute_game_stats(self, df):
-        """Game stats about duration of the games, times on offense for each team."""
+        """Computes and stores game statistics, such as duration of the games, times on offense for each team, etc."""
         game_start = df['Time'].min()
         game_end = df['Time'].max()
         total_gametime = (game_end - game_start) / 60
@@ -152,151 +160,104 @@ class DataBatchCleaner:
         self.a_intervals = a_intervals
         self.b_intervals = b_intervals
         self.timeout_intervals = timeout_intervals
-
-        # return {"Total game time is:", total_gametime, 
-        #         "minutes.\nTotal duration of the first half is:",
-        #         first_half_dur, "minutes.\nTotal duration of the second half is:", 
-        #         second_half_dur, "minutes.\nTeam A was on offense for:", a_total_minutes, 
-        #         "minutes (excluding timeouts).\nTeam B was on offense for:", b_total_minutes, 
-        #         "minutes (excluding timeouts).\nTotal timeout duration:", total_timeout_duration, 
-        #         "minutes. \nTotal playing time of the whole game (excluding breaks) is:", total_gametime_excl_breaks, "minutes."
-        #         }, df_teamA_offense, df_teamB_offense, a_total_minutes, b_total_minutes
         
-        return df_teamA_offense, df_teamB_offense, a_total_minutes, b_total_minutes, total_gametime_excl_breaks, a_intervals, b_intervals, timeout_intervals
-
-    def extract_indicators_teamA(self, df, game_id):
-        # First call the compute function to populate instance variables
-        self.compute_game_stats(df)
-        # Now you can use them
-        df_teamA_offense = self.df_teamA_offense
-        a_total_minutes = self.a_total_minutes
-        total_gametime_excl_breaks = self.total_gametime_excl_breaks
-        a_intervals = self.a_intervals
-        timeout_intervals = self.timeout_intervals
-        
-        indicators_A = {}
-
-        key = f"{game_id}_teamA"
-        
-        #1
-        scores_A = df_teamA_offense['Behaviour'].value_counts().get('Score', 0)
-        att_scores_A = df_teamA_offense['Behaviour'].value_counts().get('Scoring_attempt', 0)
-        f_turnover_EZ_A = df_teamA_offense[(df_teamA_offense['Behaviour'] == 'Forced_turnover') & (df_teamA_offense['Field_Loc'] == 'EZ_Off')].shape[0]
-        uf_turnover_EZ_A = df_teamA_offense[(df_teamA_offense['Behaviour'] == 'Unforced_turnover') & (df_teamA_offense['Field_Loc'] == 'EZ_Off')].shape[0]
-        score_attempts_A = scores_A + att_scores_A + f_turnover_EZ_A + uf_turnover_EZ_A
-        
-        #2
-        score_efficiency_A = scores_A / score_attempts_A
-        
-        #3
-        disc_possession_A = a_total_minutes / total_gametime_excl_breaks * 100
-
-        #4
-        succ_pass_A = df_teamA_offense['Behaviour'].value_counts().get('Successful_pass', 0) + scores_A
-        f_turnover_A = df_teamA_offense['Behaviour'].value_counts().get('Forced_turnover', 0)
-        uf_turnover_A = df_teamA_offense['Behaviour'].value_counts().get('Unforced_turnover', 0)
-        total_pass_A = succ_pass_A + f_turnover_A + uf_turnover_A + att_scores_A
-        pass_acc_A = succ_pass_A / total_pass_A * 100
-        
-        #7
-        total_turnover_A = f_turnover_A + uf_turnover_A
-        
-        #10
-        score_times = df_teamA_offense[df_teamA_offense['Behaviour'] == 'Score']['Time'].tolist()
-        scoring_pos_A = self.get_scoring_possessions(a_intervals, score_times)
-        passes_per_score_A = self.count_passes_in_possessions(scoring_pos_A, df_teamA_offense)
-        avg_passes_per_score_A = np.mean(passes_per_score_A) if passes_per_score_A else 0
-        
-        #11
-        pass_rate_A = total_pass_A / a_total_minutes
-        
-        #12
-        teamA_durations = self.subtract_timeouts(a_intervals, timeout_intervals)
-        avg_teamA_sec = np.mean(teamA_durations)
-        
-        indicators_A[key] = {
-                "score_attempts": score_attempts_A,
-                "score_efficiency": score_efficiency_A,
-                "disc_possession": disc_possession_A,
-                "pass_acc": pass_acc_A,
-                "f_turnover": f_turnover_A,
-                "uf_turnover": uf_turnover_A,
-                "total_turnover": total_turnover_A,
-                # "subs": df_teamA_offense['Subs_A'[0]],
-                # "early_win": df_teamA_offense['Early win'[0]],
-                "avg_passes_per_score": avg_passes_per_score_A,
-                "pass_rate": pass_rate_A,
-                "avg_poss": avg_teamA_sec,
+        game_stats = {
+            "a_total_minutes": a_total_minutes,
+            "b_total_minutes": b_total_minutes,
+            "first_half_dur": first_half_dur,
+            "second_half_dur": second_half_dur,
+            "total_timeout_duration": total_timeout_duration,
+            "total_gametime_excl_breaks": total_gametime_excl_breaks,
+            "total_gametime": total_gametime
         }
-
-        return indicators_A
+        
+        return df_teamA_offense, df_teamB_offense, a_total_minutes, b_total_minutes, total_gametime_excl_breaks, a_intervals, b_intervals, timeout_intervals, game_stats
     
-    def extract_indicators_teamB(self, df, game_id):
-        # First call the compute function to populate instance variables
+    def extract_indicators_by_team(self, df, game_id, team):
+        """Extracts performance indicators for a specified team in a given game."""
         self.compute_game_stats(df)
-        # Now you can use them
-        df_teamB_offense = self.df_teamB_offense
-        b_total_minutes = self.b_total_minutes
+
+        if team == 'A':
+            df_team = self.df_teamA_offense
+            total_minutes = self.a_total_minutes
+            intervals = self.a_intervals
+        elif team == 'B':
+            df_team = self.df_teamB_offense
+            total_minutes = self.b_total_minutes
+            intervals = self.b_intervals
+        else:
+            raise ValueError("Team must be 'A' or 'B'.")
+
         total_gametime_excl_breaks = self.total_gametime_excl_breaks
-        b_intervals = self.b_intervals
         timeout_intervals = self.timeout_intervals
-        
-        indicators_B = {}
 
-        key = f"{game_id}_teamB"
-        
-        #1
-        scores_B = df_teamB_offense['Behaviour'].value_counts().get('Score', 0)
-        att_scores_B = df_teamB_offense['Behaviour'].value_counts().get('Scoring_attempt', 0)
-        f_turnover_B = df_teamB_offense[(df_teamB_offense['Behaviour'] == 'Forced_turnover') & (df_teamB_offense['Field_Loc'] == 'EZ_Off')].shape[0]
-        uf_turnover_B = df_teamB_offense[(df_teamB_offense['Behaviour'] == 'Unforced_turnover') & (df_teamB_offense['Field_Loc'] == 'EZ_Off')].shape[0]
-        score_attempts_B = scores_B + att_scores_B + f_turnover_B + uf_turnover_B
-        
-        #2
-        score_efficiency_B = scores_B / score_attempts_B
-        
-        #3
-        disc_possession_B = b_total_minutes / total_gametime_excl_breaks * 100
+        key = f"{game_id}_team{team}"
 
-        #4
-        succ_pass_B = df_teamB_offense['Behaviour'].value_counts().get('Successful_pass', 0) + scores_B
-        f_turnover_B = df_teamB_offense['Behaviour'].value_counts().get('Forced_turnover', 0)
-        uf_turnover_B = df_teamB_offense['Behaviour'].value_counts().get('Unforced_turnover', 0)
-        total_pass_B = succ_pass_B + f_turnover_B + uf_turnover_B + att_scores_B
-        pass_acc_B = succ_pass_B / total_pass_B * 100
+        # 1
+        scores = df_team['Behaviour'].value_counts().get('Score', 0)
+        att_scores = df_team['Behaviour'].value_counts().get('Scoring_attempt', 0)
+        f_turnover_EZ = df_team[(df_team['Behaviour'] == 'Forced_turnover') & (df_team['Field_Loc'] == 'EZ_Off')].shape[0]
+        uf_turnover_EZ = df_team[(df_team['Behaviour'] == 'Unforced_turnover') & (df_team['Field_Loc'] == 'EZ_Off')].shape[0]
+        score_attempts = scores + att_scores + f_turnover_EZ + uf_turnover_EZ
+
+        # 2
+        score_efficiency = scores / score_attempts if score_attempts * 100 else 0
+
+        # 3
+        disc_possession = total_minutes / total_gametime_excl_breaks * 100
+
+        # 4
+        succ_pass = df_team['Behaviour'].value_counts().get('Successful_pass', 0) + scores
+        f_turnover = df_team['Behaviour'].value_counts().get('Forced_turnover', 0)
+        uf_turnover = df_team['Behaviour'].value_counts().get('Unforced_turnover', 0)
+        total_pass = succ_pass + f_turnover + uf_turnover + att_scores
+        pass_acc = succ_pass / total_pass * 100 if total_pass else 0
+
+        # 7
+        total_turnover = f_turnover + uf_turnover
         
-        #7
-        total_turnover_B = f_turnover_B + uf_turnover_B
+        # 8
+        subs = df_team[f'Subs_{team}'].iloc[0]
         
-        #10
-        score_times = df_teamB_offense[df_teamB_offense['Behaviour'] == 'Score']['Time'].tolist()
-        scoring_pos_B = self.get_scoring_possessions(b_intervals, score_times)
-        passes_per_score_B = self.count_passes_in_possessions(scoring_pos_B, df_teamB_offense)
-        avg_passes_per_score_B = np.mean(passes_per_score_B) if passes_per_score_B else 0
+        # 9
+        early_win = df_team['Early win'].iloc[0]
+
+        # 10
+        score_times = df_team[df_team['Behaviour'] == 'Score']['Time'].tolist()
+        scoring_pos = self.get_scoring_possessions(intervals, score_times)
+        passes_per_score = self.count_passes_in_possessions(scoring_pos, df_team)
+        avg_passes_per_score = np.mean(passes_per_score) if passes_per_score else 0
+
+        # 11
+        pass_rate = total_pass / total_minutes if total_minutes else 0
+
+        # 12
+        durations = self.subtract_timeouts(intervals, timeout_intervals)
+        avg_poss = np.mean(durations) if durations else 0
         
-        #11
-        pass_rate_B = total_pass_B / b_total_minutes
-        
-        #12
-        teamB_durations = self.subtract_timeouts(b_intervals, timeout_intervals)
-        avg_teamB_sec = np.mean(teamB_durations)
-        
-        indicators_B[key] = {
-                "score_attempts": score_attempts_B,
-                "score_efficiency": score_efficiency_B,
-                "disc_possession": disc_possession_B,
-                "pass_acc": pass_acc_B,
-                "f_turnover": f_turnover_B,
-                "uf_turnover": uf_turnover_B,
-                "total_turnover": total_turnover_B,
-                "subs": df_teamB_offense['Subs_A'[0]],
-                "early_win": df_teamB_offense['Early win'[0]],
-                "avg_passes_per_score": avg_passes_per_score_B,
-                "pass_rate": pass_rate_B,
-                "avg_poss": avg_teamB_sec,
+        # Determine win (1 = win, 0 = loss)
+        a_scores = self.df_teamA_offense['Behaviour'].value_counts().get('Score', 0)
+        b_scores = self.df_teamB_offense['Behaviour'].value_counts().get('Score', 0)
+        win = 1 if (team == 'A' and a_scores > b_scores) or (team == 'B' and b_scores > a_scores) else 0
+
+        return {
+            key: {
+                "win": win,
+                "points_scored": scores,
+                "score_attempts": score_attempts,
+                "score_efficiency": score_efficiency,
+                "disc_possession": disc_possession,
+                "pass_acc": pass_acc,
+                "f_turnover": f_turnover,
+                "uf_turnover": uf_turnover,
+                "total_turnover": total_turnover,
+                "subs": subs,
+                "early_win": early_win,
+                "avg_passes_per_score": avg_passes_per_score,
+                "pass_rate": pass_rate,
+                "avg_poss": avg_poss,
+            } 
         }
-
-        return indicators_B
 
     def run(self):
         for filename in os.listdir(self.input_dir):
@@ -308,25 +269,42 @@ class DataBatchCleaner:
                     df = pd.read_csv(filepath)
                     cleaned_df = self.clean_data(df)
 
-                    # Save cleaned data
+                    # Save cleaned data of each game
                     cleaned_path = os.path.join(self.output_dir, f"cleaned_{filename}")
                     cleaned_df.to_csv(cleaned_path, index=False)
+                    
+                    # Extract stats
+                    df_teamA_offense, df_teamB_offense, a_total_minutes, b_total_minutes, total_gametime_excl_breaks, a_intervals, b_intervals, timeout_intervals, game_stats = self.compute_game_stats(cleaned_df)
+
+                    # 💡 Add game_id to game_stats and store
+                    game_stats["game_id"] = game_id
+                    self.game_stats_data.append(game_stats)
 
                     # Extract indicators
-                    indicators_A = self.extract_indicators_teamA(cleaned_df, game_id)
-                    for team_key, team_indicators in indicators_A.items():
-                        row = {"team_id": team_key}
-                        row.update(team_indicators)
-                        self.summary_data.append(row)
+                    for team in ['A', 'B']:
+                        indicators = self.extract_indicators_by_team(cleaned_df, game_id, team)
+                        for team_key, team_indicators in indicators.items():
+                            row = {"team_id": team_key}
+                            row.update(team_indicators)
+                            self.summary_data.append(row)
 
                     print(f"Processed {filename}")
                 except Exception as e:
                     print(f"Error in {filename}: {e}")
 
-        # Save summary indicators
+        # Save summary indicators to a CSV file
         summary_df = pd.DataFrame(self.summary_data)
+        summary_df = summary_df.sort_values(by = 'team_id').reset_index(drop = True)
         summary_df.to_csv(os.path.join(self.output_dir, "summary_indicators.csv"), index=False)
-        print("Saved summary_indicators.csv")
+        
+        # Save game-level statistics
+        game_stats_df = pd.DataFrame(self.game_stats_data)
+        cols = ['game_id'] + [col for col in game_stats_df.columns if col != 'game_id'] # 💡 Move 'game_id' column to the front
+        game_stats_df = game_stats_df[cols]
+        game_stats_df = game_stats_df.sort_values(by='game_id').reset_index(drop=True)
+        game_stats_df.to_csv(os.path.join(self.output_dir, "game_stats.csv"), index=False)
+
+        print("Saved summary_indicators.csv and game_stats.csv")
 
 if __name__ == "__main__":
     input_dir = "./data/raw"
