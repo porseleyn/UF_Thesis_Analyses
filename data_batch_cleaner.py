@@ -201,7 +201,7 @@ class DataBatchCleaner:
         score_attempts = scores + att_scores + f_turnover_EZ + uf_turnover_EZ
 
         # 2
-        score_efficiency = scores / score_attempts if score_attempts * 100 else 0
+        score_efficiency = scores / score_attempts * 100 if score_attempts else 0
 
         # 3
         disc_possession = total_minutes / total_gametime_excl_breaks * 100
@@ -253,10 +253,10 @@ class DataBatchCleaner:
                 "total_turnover": total_turnover,
                 "subs": subs,
                 "early_win": early_win,
-                "avg_passes_per_score": avg_passes_per_score,
+                "poss_eff": avg_passes_per_score,
                 "pass_rate": pass_rate,
-                "avg_poss": avg_poss,
-            } 
+                "poss_dur": avg_poss,
+            }
         }
 
     def run(self):
